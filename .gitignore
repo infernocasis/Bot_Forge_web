@@ -1,0 +1,25 @@
+# Зависимости и сборка
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Секреты: в git только .env.example
+.env
+.env.*
+!.env.example
+
+# Сертификаты Let's Encrypt и загрузки
+deploy/certbot/
+uploads/
+
+# Логи
+*.log
+npm-debug.log*
+
+# IDE и ОС
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db

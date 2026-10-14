@@ -1,0 +1,5 @@
+# Единые LF в репозитории независимо от ОС
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.webp binary
