@@ -4,3 +4,4 @@
 
 - [Техническое задание](TZ-BotForge-MVP.md)
 - [Архитектура](architecture.md)
+- [Дизайн-система](DESIGN.md)

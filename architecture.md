@@ -76,9 +76,10 @@ botforge/
 │   │   │   │   ├── http.ts         # fetch-обёртка: /api/v1, credentials, разбор { code, message, fields }
 │   │   │   │   ├── ui/             # Button, Modal, Toast, Skeleton, Drawer — базовые компоненты
 │   │   │   │   └── utils/          # markdown.ts (marked + DOMPurify), focus-trap и т.п.
-│   │   │   └── styles/main.css     # Tailwind
-│   │   ├── vite.config.ts          # rollupOptions.input: { index, admin }, proxy /api → :3000
-│   │   ├── tailwind.config.ts
+│   │   │   └── styles/
+│   │   │       ├── main.css        # Tailwind v4: @import "tailwindcss" + @import "./theme.css"
+│   │   │       └── theme.css       # @theme, генерируется из DESIGN.md (см. 5.5), руками не правится
+│   │   ├── vite.config.ts          # rollupOptions.input: { index, admin }, proxy /api → :3000, плагин @tailwindcss/vite
 │   │   └── package.json
 │   │
 │   └── api/                        # Бэкенд
@@ -144,6 +145,7 @@ botforge/
 ├── tsconfig.base.json              # strict, общие опции
 ├── eslint.config.js                # flat config на весь монорепозиторий
 ├── .prettierrc
+├── DESIGN.md                       # Дизайн-система: токены (YAML) + правила применения, см. 5.5
 ├── package.json                    # workspaces: ["apps/*", "packages/*"], корневые скрипты (dev через concurrently)
 └── README.md                       # Запуск: docker compose up, сиды, создание админа
 ```
@@ -345,6 +347,15 @@ sequenceDiagram
 ### 5.4. Поведение админки при 401
 
 `http.ts` при ответе 401 из админки сохраняет текущий hash-маршрут и переводит на `#/login?redirect=…`; после входа возвращает обратно (требование 5.1 ТЗ).
+
+### 5.5. Дизайн-система
+
+Источник истины — [DESIGN.md](DESIGN.md) в корне репозитория (формат `@google/design.md`): токены в YAML front matter, правила применения — в тексте.
+
+- **Токены → Tailwind.** `design.md export --format css-tailwind DESIGN.md > apps/web/src/styles/theme.css` выдаёт блок `@theme` для Tailwind v4, утилиты вида `bg-surface`, `text-link`, `rounded-card` появляются автоматически. `theme.css` не правится руками: меняется DESIGN.md, файл генерируется заново.
+- **Проверка.** `design.md lint DESIGN.md` ловит битые ссылки между токенами и недостаточный контраст. Запускается вместе с ESLint.
+- **Шрифты.** Inter и Inter Tight подключаются локально через `@fontsource-variable/*` и попадают в `dist/`. С Google Fonts не грузятся: IP посетителя не уходит за рубеж, а CSP не нужно расширять.
+- Витрина и админка используют одну тему. Декоративные элементы витрины (теги в hero) в админку не тянутся, они лежат в `storefront/components`.
 
 ---
 
