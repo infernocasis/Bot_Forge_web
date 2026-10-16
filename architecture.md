@@ -1,6 +1,8 @@
 # Архитектура BotForge (MVP)
 
-Документ описывает, как устроен код BotForge: где что лежит, как части связаны между собой и как всё это попадает на сервер. Основа — [ТЗ v4](TZ-BotForge-MVP.md).
+Документ описывает, как устроен код BotForge: где что лежит, как части связаны между собой и как всё это попадает на сервер. Основа — [ТЗ v5](TZ-BotForge-MVP.md).
+
+Название «BotForge» рабочее. В коде оно не встречается: пользователь видит его из `StoreSettings`, служебные значения берутся из `.env` (см. 5.6). Внутренний пакет называется нейтрально — `@app/shared`.
 
 Главный принцип: **один репозиторий, три контейнера, один процесс бэкенда**. Масштаб заложен точками расширения (они перечислены в разделе 10), но в MVP ничего из этого не включено.
 
@@ -48,7 +50,7 @@ flowchart LR
 Монорепозиторий на **npm workspaces** (встроены в npm, дополнительных инструментов не нужно).
 
 ```
-botforge/
+Bot_Forge_web/
 ├── apps/
 │   ├── web/                        # Фронтенд: витрина + админка (один Vite-проект, две точки входа)
 │   │   ├── index.html              # Точка входа витрины
@@ -86,7 +88,7 @@ botforge/
 │       ├── prisma/
 │       │   ├── schema.prisma
 │       │   ├── migrations/
-│       │   └── seed.ts             # 12 товаров, 4 категории, пустые StoreSettings
+│       │   └── seed.ts             # 12 товаров, 4 категории, StoreSettings с названием из STORE_NAME
 │       ├── src/
 │       │   ├── main.ts             # Точка входа: config → app → bot → workers → listen; graceful shutdown
 │       │   ├── app.ts              # Сборка Fastify: плагины + модули (без listen — удобно для тестов)
@@ -114,8 +116,8 @@ botforge/
 │       │   │   └── outbox.ts       # Раз в 10 с: PENDING → отправка → SENT/FAILED
 │       │   ├── cli/                # admin-create.ts, admin-reset-password.ts (интерактивный ввод)
 │       │   └── lib/                # password.ts (argon2id), tokens.ts, order-number.ts, slugify.ts
-│       ├── test/                   # vitest: orders.service, auth.service
-│       ├── tsdown.config.ts        # Прод-сборка в один бандл, встраивает @botforge/shared (см. 2.3)
+│       ├── test/                   # vitest: orders.service, auth.service, pricing (итог с FROM/FROM_HOURLY)
+│       ├── tsdown.config.ts        # Прод-сборка в один бандл, встраивает @app/shared (см. 2.3)
 │       └── package.json
 │
 ├── packages/
@@ -123,11 +125,11 @@ botforge/
 │       ├── src/
 │       │   ├── schemas/            # zod: order.ts, product.ts, category.ts, store.ts, cart.ts
 │       │   ├── constants.ts        # Лимиты: 1–99 шт., 50 позиций, 6 картинок, 5 МБ…
-│       │   ├── enums.ts            # PriceType, OrderStatus, PreferredContact + разрешённые переходы статусов
-│       │   ├── money.ts            # formatPrice(kopecks, priceType) → «от 1 500 ₽/час»
+│       │   ├── enums.ts            # PriceType (FIXED | FROM | FROM_HOURLY), OrderStatus, PreferredContact + переходы статусов
+│       │   ├── pricing.ts          # formatPrice → «9 900 ₽» / «от 15 000 ₽» / «от 1 500 ₽/час»; isQuantityLocked; calcTotal (см. 4.2)
 │       │   ├── phone.ts            # Нормализация +7…
 │       │   └── api-types.ts        # DTO ответов API (ProductCard, ProductDetails, CartPreview…)
-│       └── package.json            # name: @botforge/shared, exports → ./src/index.ts, своей сборки нет
+│       └── package.json            # name: @app/shared, exports → ./src/index.ts, своей сборки нет
 │
 ├── deploy/
 │   ├── nginx/
@@ -183,10 +185,10 @@ flowchart TD
 
 Голые npm workspaces не умеют две вещи: запускать скрипты пакетов параллельно (`npm run dev --workspaces` выполняет их по очереди, и первый watch-процесс блокирует остальные) и собирать пакеты в порядке зависимостей (`--workspaces` идёт в порядке объявления). Обе проблемы решаются без отдельного оркестратора:
 
-1. **`@botforge/shared` — пакет из исходников, без своей сборки** (в документации Turborepo такой подход называется Just-in-Time internal package). Его `package.json` экспортирует `./src/index.ts`, а TypeScript компилирует тот, кто его импортирует:
+1. **`@app/shared` — пакет из исходников, без своей сборки** (в документации Turborepo такой подход называется Just-in-Time internal package). Его `package.json` экспортирует `./src/index.ts`, а TypeScript компилирует тот, кто его импортирует:
    - **web:** Vite сам компилирует TS из workspace-пакетов, подключённых симлинком;
    - **api в dev:** `tsx watch` выполняет TS напрямую, включая импорты из `shared`;
-   - **api в prod:** tsdown собирает `src/main.ts` в один бандл. `@botforge/shared` указан в `deps.alwaysBundle` и встраивается в бандл, остальные `dependencies` (Prisma, sharp, argon2) остаются внешними, как и должны.
+   - **api в prod:** tsdown собирает `src/main.ts` в один бандл. `@app/shared` указан в `deps.alwaysBundle` и встраивается в бандл, остальные `dependencies` (Prisma, sharp, argon2) остаются внешними, как и должны.
 
    Раз собирать `shared` не нужно, исчезает и вопрос порядка сборки: каждое приложение собирается независимо одной командой.
 2. **Параллельный dev-запуск** — через `concurrently` в корневом `package.json`: `concurrently -n api,web "npm:dev -w apps/api" "npm:dev -w apps/web"`. Логи обоих процессов идут в один терминал с префиксами, а `Ctrl+C` останавливает оба.
@@ -211,7 +213,7 @@ flowchart TD
 HTTP-запрос → routes.ts → service.ts → Prisma → PostgreSQL
                │            │
                │            └─ бизнес-правила, транзакции, бросает AppError
-               └─ валидация zod-схемой из @botforge/shared, проверка доступа, маппинг в DTO
+               └─ валидация zod-схемой из @app/shared, проверка доступа, маппинг в DTO
 ```
 
 - **routes** — тонкие: распарсить, проверить, вызвать сервис, вернуть ответ. Ни одного запроса к БД.
@@ -259,6 +261,7 @@ app.get('/api/health', healthHandler)                     // SELECT 1 к БД
 | Блокировка входа (5 попыток / 15 мин) | `auth.service` по таблице `LoginAttempt` — переживает перезапуск |
 | Реальный IP клиента | Fastify `trustProxy: true`, Nginx передаёт `X-Forwarded-For`. **Без этого все лимиты будут считать IP Nginx** |
 | Загрузки: сигнатура файла, ≤ 5 МБ, пересжатие, случайное имя | `modules/uploads` |
+| `exampleUrl` и `videoUrl` — только `https:` | zod-схема товара в `@app/shared`. Без этого ссылка `javascript:…` из админки станет XSS на витрине |
 
 ### 3.6. Telegram и outbox
 
@@ -293,6 +296,8 @@ sequenceDiagram
 
 Ключевое: заявка и запись outbox создаются **в одной транзакции**. Если Telegram лежит или процесс упал сразу после ответа клиенту, запись `PENDING` останется в БД и будет отправлена после перезапуска — это критерий «при выключенном боте уведомление доходит после запуска».
 
+Текст уведомления собирает `bot/messages.ts`. Строки позиций и итог форматируются через `pricing.ts` из снимков `OrderItem`: если в заявке есть `FROM`-товары, итог выглядит как «Итого: от 27 800 ₽», для почасовых добавляется «+ почасовые работы по оценке». Название магазина в тексте не зашито.
+
 `FOR UPDATE SKIP LOCKED` в MVP не обязателен (процесс один), но стоит одну строку и заранее защищает от двойной отправки, если воркеров станет больше.
 
 ---
@@ -300,10 +305,10 @@ sequenceDiagram
 ## 4. База данных
 
 - **Prisma-схема** — `apps/api/prisma/schema.prisma`, миграции в `prisma/migrations` (коммитятся в git).
-- **Деньги** — только целые копейки (`Int`), форматирование — `packages/shared/money.ts`. Никаких float.
-- **Номер заявки** `BF-000123` — из автоинкрементного `id` (или отдельной sequence) при создании, а не `count() + 1`: подсчёт даёт дубли при параллельных заявках.
+- **Деньги** — только целые копейки (`Int`), форматирование и итоги — `packages/shared/pricing.ts`. Никаких float.
+- **Номер заявки** `BF-000123` — из автоинкрементного `id` (или отдельной sequence) при создании, а не `count() + 1`: подсчёт даёт дубли при параллельных заявках. Префикс `BF` берётся из `ORDER_NUMBER_PREFIX` в `.env` (см. 5.6). Номер сохраняется в `publicId` целиком, поэтому смена префикса старые заявки не трогает.
 - **Мягкое удаление** товаров (`deletedAt`): все публичные запросы каталога фильтруют `isPublished = true AND deletedAt IS NULL` в одном месте — `catalog.service`.
-- **Индексы:** `Product(slug)` unique, `Product(categoryId, isPublished)`, `Order(status, createdAt)`, `Order(publicId)` unique, `NotificationOutbox(status, createdAt)`, `LoginAttempt(ip, createdAt)`, `Session(tokenHash)` unique.
+- **Индексы:** `Product(slug)` unique, `Product(categoryId, isPublished)`, `Product(isUpsell, isPublished)`, `Order(status, createdAt)`, `Order(publicId)` unique, `NotificationOutbox(status, createdAt)`, `LoginAttempt(ip, createdAt)`, `Session(tokenHash)` unique.
 
 ### 4.1. Уточнения к модели данных из ТЗ
 
@@ -315,6 +320,21 @@ sequenceDiagram
 | `NotificationOutbox`: `type` (`ORDER_CREATED`, `LOGIN_NEW_IP`, `LOGIN_BLOCKED`) + `payload Json`, `orderId` необязателен | ТЗ требует оповещения о входе с нового IP и о подборе пароля. Пусть они идут через тот же надёжный outbox, а не отдельным кодом |
 | `OneTimeToken.purpose` — enum | Для будущих целей (2FA через бота из бэклога) без миграции типа поля |
 
+### 4.2. Цены, итоги и поля товара
+
+Три типа цены (`PriceType`): `FIXED`, `FROM`, `FROM_HOURLY`. Все правила вокруг них живут в одном файле — `packages/shared/pricing.ts`. Его импортируют витрина (карточка, корзина), `cart.service`, `orders.service` и `bot/messages.ts`. Поэтому итог на сайте, в заявке и в Telegram не может разойтись.
+
+| Функция | Что делает |
+|---|---|
+| `formatPrice(kopecks, priceType)` | «9 900 ₽» / «от 15 000 ₽» / «от 1 500 ₽/час» |
+| `isQuantityLocked(priceType)` | `true` для `FROM` и `FROM_HOURLY`: счётчик не показывается, количество всегда 1 |
+| `calcTotal(items)` | `{ totalKopecks, hasNonFixedItems, hasHourlyItems }`. Первый флаг включает префикс «от», второй — приписку «+ почасовые работы по оценке» |
+
+- **Количество 1 для «от»-товаров проверяет сервер.** Zod-схема заявки не знает тип цены (он в БД), поэтому `orders.service` после загрузки товаров принудительно ставит `quantity = 1` для `FROM` и `FROM_HOURLY`. Фронт только прячет счётчик.
+- **`Order.hasNonFixedItems`** заполняется из `calcTotal` и вместе со снимком `priceTypeSnapshot` позволяет показать итог «от …» в админке и Telegram без пересчёта по текущим товарам.
+- **Ссылка на пример.** `exampleUrl` и `exampleLabel` (до 30 символов) — пара: zod-схема товара через `refine` требует подпись, если задана ссылка. Ссылка рендерится как `<a target="_blank" rel="noopener noreferrer">` с текстом из `exampleLabel`. Разрешён только протокол `https:` (см. 3.5).
+- **«С этим покупают».** `catalog.service.getUpsell(excludeProductId)` отдаёт до 3 опубликованных товаров с `isUpsell = true`, кроме текущего. Порядок: `isFeatured` впереди, затем по `sortOrder` категории. Блок приходит внутри `ProductDetails` (`upsell: ProductCard[]`), отдельного запроса нет.
+
 ---
 
 ## 5. Фронтенд
@@ -322,13 +342,19 @@ sequenceDiagram
 ### 5.1. Общение с API
 
 - Все запросы идут через `web/src/shared/http.ts`: префикс `/api/v1`, `credentials: 'same-origin'`, разбор ошибки в типизированный `ApiError { code, message, fields }`.
-- Типы ответов — из `@botforge/shared/api-types`, схемы форм — из `@botforge/shared/schemas`. Одна zod-схема заявки валидирует форму на фронте и тело запроса на бэке.
+- Типы ответов — из `@app/shared/api-types`, схемы форм — из `@app/shared/schemas`. Одна zod-схема заявки валидирует форму на фронте и тело запроса на бэке.
 - Отдельная библиотека для запросов (TanStack Query и т.п.) в MVP не нужна: данных немного, кеш каталога держат Pinia-сторы и composables.
 
 ### 5.2. Витрина
 
 - **Корзина:** Pinia-стор, `{ productId, quantity }[]` в `localStorage` (`cart:v1`). Названия и цены в localStorage не хранятся — при открытии виджета их отдаёт `POST /cart/preview`. Так клиент всегда видит актуальные цены, а подделка localStorage ни на что не влияет: сервер в `POST /orders` всё равно берёт цены из БД.
 - **Фильтры каталога** (категория, сортировка, поиск) живут в query-параметрах URL — ссылку с фильтром можно отправить клиенту, работает «Назад».
+- **Каталог управляется данными** (требование ТЗ: новое направление добавляется без кода):
+  - чипсы фильтра строятся из `GET /categories` в порядке `sortOrder`, в URL — `slug` категории;
+  - в коде нет сравнений с названиями и slug категорий и товаров. Поведение задают только поля товара: `priceType`, `isFeatured`, `isUpsell`, `exampleUrl`;
+  - цвет тега категории выбирается по её позиции в списке: `tagPalette[index % tagPalette.length]` (палитра — в [DESIGN.md](DESIGN.md)). Новая категория сразу получает цвет, а схема БД и форма админки не меняются;
+  - единственное место с конкретными названиями — `prisma/seed.ts`, это данные, а не логика.
+- **Кнопка примера** на карточке товара показывается, только если заполнен `exampleUrl`, текст кнопки — `exampleLabel`.
 - **SEO:** `<title>` и meta description выставляет composable `useSeo` при загрузке товара (см. риски в разделе 11).
 
 ### 5.3. Админка и `ADMIN_PATH`
@@ -356,6 +382,24 @@ sequenceDiagram
 - **Проверка.** `design.md lint DESIGN.md` ловит битые ссылки между токенами и недостаточный контраст. Запускается вместе с ESLint.
 - **Шрифты.** Inter и Inter Tight подключаются локально через `@fontsource-variable/*` и попадают в `dist/`. С Google Fonts не грузятся: IP посетителя не уходит за рубеж, а CSP не нужно расширять.
 - Витрина и админка используют одну тему. Декоративные элементы витрины (теги в hero) в админку не тянутся, они лежат в `storefront/components`.
+- Декоративные теги hero тоже строятся из данных: названия категорий и до 6 опубликованных товаров из `GET /products`, а не захардкоженный список.
+
+### 5.6. Рабочее название и брендинг
+
+Название магазина может смениться, поэтому оно не встречается ни в исходниках, ни в собранных бандлах.
+
+| Где нужно название | Откуда берётся |
+|---|---|
+| Логотип-надпись в шапке, подвал, `<title>` и meta, политика конфиденциальности | `StoreSettings.name` через `GET /store` (стор `store-settings.ts`) |
+| Telegram-уведомления, оповещения о входе | `StoreSettings.name` в `bot/messages.ts` |
+| Первое значение `StoreSettings.name` при сиде | `STORE_NAME` в `.env`, читает только `seed.ts` |
+| Префикс номера заявки `BF-` | `ORDER_NUMBER_PREFIX` в `.env` |
+| Имя Telegram-бота в ссылке привязки | `TELEGRAM_BOT_USERNAME` в `.env` |
+| Домен, origin | `DOMAIN`, `APP_ORIGIN` в `.env` |
+
+- В статических `index.html` и `admin.html` `<title>` нейтральный («Каталог», «Админка»). После загрузки `GET /store` его заменяет `useSeo`.
+- Имена пакетов и папок нейтральные (`@app/shared`, `apps/web`, `apps/api`), чтобы смена названия не требовала массовой правки импортов.
+- Переименование магазина: поменять название в админке («О магазине») и при необходимости `ORDER_NUMBER_PREFIX` в `.env`. Пересборка не нужна.
 
 ---
 
@@ -384,6 +428,8 @@ NODE_ENV=
 DOMAIN=                     # botforge.ru
 APP_ORIGIN=                 # https://botforge.ru — для проверки Origin и ссылок из бота
 ADMIN_PATH=                 # /cp-xxxxxx — знают только web (Nginx) и api (ссылка «Открыть в админке»)
+STORE_NAME=                 # BotForge — только начальное значение StoreSettings.name для seed, дальше правится в админке
+ORDER_NUMBER_PREFIX=        # BF — префикс номера заявки
 
 POSTGRES_DB=
 POSTGRES_USER=
