@@ -117,6 +117,7 @@ Bot_Forge_web/
 │       │   ├── cli/                # admin-create.ts, admin-reset-password.ts (интерактивный ввод)
 │       │   └── lib/                # password.ts (argon2id), tokens.ts, order-number.ts, slugify.ts
 │       ├── test/                   # vitest: orders.service, auth.service, pricing (итог с FROM/FROM_HOURLY)
+│       ├── prisma.config.ts        # Prisma 7: путь к схеме, миграциям и DATABASE_URL (см. 4)
 │       ├── tsdown.config.ts        # Прод-сборка в один бандл, встраивает @app/shared (см. 2.3)
 │       └── package.json
 │
@@ -305,6 +306,10 @@ sequenceDiagram
 ## 4. База данных
 
 - **Prisma-схема** — `apps/api/prisma/schema.prisma`, миграции в `prisma/migrations` (коммитятся в git).
+- **Prisma 7.10** (не 8.x: на npm `latest` указывает на `8.0.0-rc`). `prisma`, `@prisma/client` и `@prisma/adapter-pg` закреплены на одной точной версии. Особенности v7:
+  - генератор `prisma-client` пишет клиент в `apps/api/src/generated/prisma` (в `.gitignore`), импорт — из `../generated/prisma/client`;
+  - подключение к PostgreSQL — через драйвер-адаптер `new PrismaPg({ connectionString })` в `plugins/prisma.ts`;
+  - настройки CLI — в `prisma.config.ts`; `.env` Prisma сама не читает, поэтому там `import 'dotenv/config'`, а `dotenv` и `prisma` лежат в `dependencies` (нужны `prisma migrate deploy` в прод-образе).
 - **Деньги** — только целые копейки (`Int`), форматирование и итоги — `packages/shared/pricing.ts`. Никаких float.
 - **Номер заявки** `BF-000123` — из автоинкрементного `id` (или отдельной sequence) при создании, а не `count() + 1`: подсчёт даёт дубли при параллельных заявках. Префикс `BF` берётся из `ORDER_NUMBER_PREFIX` в `.env` (см. 5.6). Номер сохраняется в `publicId` целиком, поэтому смена префикса старые заявки не трогает.
 - **Мягкое удаление** товаров (`deletedAt`): все публичные запросы каталога фильтруют `isPublished = true AND deletedAt IS NULL` в одном месте — `catalog.service`.
@@ -378,8 +383,8 @@ sequenceDiagram
 
 Источник истины — [DESIGN.md](DESIGN.md) в корне репозитория (формат `@google/design.md`): токены в YAML front matter, правила применения — в тексте.
 
-- **Токены → Tailwind.** `design.md export --format css-tailwind DESIGN.md > apps/web/src/styles/theme.css` выдаёт блок `@theme` для Tailwind v4, утилиты вида `bg-surface`, `text-link`, `rounded-card` появляются автоматически. `theme.css` не правится руками: меняется DESIGN.md, файл генерируется заново.
-- **Проверка.** `design.md lint DESIGN.md` ловит битые ссылки между токенами и недостаточный контраст. Запускается вместе с ESLint.
+- **Токены → Tailwind.** `npm run design:export` (`designmd export --format css-tailwind`) выдаёт блок `@theme` для Tailwind v4, утилиты вида `bg-surface`, `text-link`, `rounded-card` появляются автоматически. `theme.css` не правится руками: меняется DESIGN.md, файл генерируется заново.
+- **Проверка.** `npm run design:lint` ловит битые ссылки между токенами и недостаточный контраст. Запускается вместе с ESLint.
 - **Шрифты.** Inter и Inter Tight подключаются локально через `@fontsource-variable/*` и попадают в `dist/`. С Google Fonts не грузятся: IP посетителя не уходит за рубеж, а CSP не нужно расширять.
 - Витрина и админка используют одну тему. Декоративные элементы витрины (теги в hero) в админку не тянутся, они лежат в `storefront/components`.
 - Декоративные теги hero тоже строятся из данных: названия категорий и до 6 опубликованных товаров из `GET /products`, а не захардкоженный список.
@@ -462,6 +467,7 @@ npm run dev                                       # concurrently: api (tsx watch
 
 - Витрина: `http://localhost:5173`, админка: `http://localhost:5173/admin.html#/login`.
 - Vite проксирует `/api` и `/uploads` на `localhost:3000`, поэтому фронт и бэк, как и на проде, живут на одном origin — cookie и проверка `Origin` работают без особых настроек для dev.
+- Нужны Node ≥ 22.18 и npm ≥ 11. npm 10.9 падает на установке этого набора зависимостей (`Cannot read properties of null (reading 'edgesOut')`). npm 11 по умолчанию не запускает install-скрипты пакетов, разрешённые перечислены в `allowScripts` корневого `package.json` (argon2, prisma, esbuild).
 - Приложения запускаются нативно, а не в Docker, ради быстрого HMR на Windows. Полный прод-стек локально проверяется командой `docker compose up --build`.
 
 ---
