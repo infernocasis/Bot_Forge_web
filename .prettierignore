@@ -1,0 +1,7 @@
+package-lock.json
+dist/
+coverage/
+apps/api/src/generated/
+apps/api/prisma/migrations/
+apps/web/src/styles/theme.css
+*.md

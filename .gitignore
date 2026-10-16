@@ -3,6 +3,8 @@ node_modules/
 dist/
 coverage/
 *.tsbuildinfo
+# Prisma Client генерируется командой prisma generate
+apps/api/src/generated/
 
 # Секреты: в git только .env.example
 .env
